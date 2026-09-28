@@ -31,6 +31,9 @@
     status: $("status"),
     placeName: $("place-name"),
     placeTime: $("place-time"),
+    greeting: $("greeting"),
+    welcomeLine: $("welcome-line"),
+    themeSelect: $("theme-select"),
     currentIcon: $("current-icon"),
     currentTemp: $("current-temp"),
     currentDesc: $("current-desc"),
@@ -97,7 +100,7 @@
   const smallMoon = `<g transform="translate(-4 -6) scale(.75)">${moonSvg}</g>`;
   const drops = (n) => {
     const xs = n === 2 ? [26, 38] : [22, 32, 42];
-    return xs.map((x) => `<path d="M${x} 52l-3 8" stroke="${C.rain}" stroke-width="3.5" stroke-linecap="round"/>`).join("");
+    return xs.map((x) => `<path class="rain" d="M${x} 52l-3 8" stroke="${C.rain}" stroke-width="3.5" stroke-linecap="round"/>`).join("");
   };
 
   function iconSvg(kind, isDay) {
@@ -244,8 +247,47 @@
     els.rain.textContent = daily.precipitation_probability_max[0] == null ? "--" : `${daily.precipitation_probability_max[0]}%`;
     els.sun.textContent = `${fmtClock(daily.sunrise[0])} / ${fmtClock(daily.sunset[0])}`;
 
+    renderWelcome(cur, daily, desc, campus);
+
     renderHourly(hourly, cur.time);
     renderDaily(daily);
+  }
+
+  // ---------- Welcome ----------
+  const USER_NAME = "Dr. Lee";
+
+  function greetingFor(hour) {
+    if (hour < 5) return `Burning the midnight oil, ${USER_NAME}?`;
+    if (hour < 12) return `Good morning, ${USER_NAME}`;
+    if (hour < 17) return `Good afternoon, ${USER_NAME}`;
+    return `Good evening, ${USER_NAME}`;
+  }
+
+  function renderWelcome(cur, daily, desc, campus) {
+    // Greeting follows the viewer's own clock; the weather line follows the selected place.
+    els.greeting.textContent = greetingFor(new Date().getHours());
+
+    const where = campus
+      ? `on the ${campus.name} campus`
+      : state.place.name === "My location" ? "where you are" : `in ${state.place.name}`;
+    const toF = (t) => (state.unit === "celsius" ? t * 9 / 5 + 32 : t);
+    const pop = daily.precipitation_probability_max[0] || 0;
+    const uv = daily.uv_index_max[0] || 0;
+    const stormy = cur.weather_code >= 95 || daily.weather_code[0] >= 95;
+
+    const tips = [];
+    if (stormy) tips.push("Storms are in the forecast, so keep an eye on the sky.");
+    else if (pop >= 50) tips.push(`Bring an umbrella: there's a ${pop}% chance of rain.`);
+    if (toF(cur.apparent_temperature) >= 95) tips.push(`It feels like ${round(cur.apparent_temperature)}°, so stay hydrated.`);
+    else if (uv >= 8 && cur.is_day === 1) tips.push("The UV index is very high today; sunscreen is a must.");
+    if (toF(cur.temperature_2m) <= 55) tips.push("It's chilly by South Florida standards. Grab a jacket.");
+    if (!tips.length) tips.push("Looks like a great day to be an Owl. Go Owls!");
+
+    const line = `It's ${round(cur.temperature_2m)}° and ${desc.toLowerCase()} ${where}, with a high of ${round(daily.temperature_2m_max[0])}° today. `;
+    const tip = document.createElement("span");
+    tip.className = "tip";
+    tip.textContent = tips.slice(0, 2).join(" ");
+    els.welcomeLine.replaceChildren(document.createTextNode(line), tip);
   }
 
   function renderHourly(hourly, nowIso) {
@@ -441,6 +483,35 @@
   const useFallbackLogo = () => { if (!logo.src.endsWith("fau-mark.svg")) logo.src = "assets/fau-mark.svg"; };
   logo.addEventListener("error", useFallbackLogo);
   if (logo.complete && logo.naturalWidth === 0) useFallbackLogo();
+
+  // ---------- Theme ----------
+  // theme-init.js already applied the saved theme before first paint; this keeps it in sync.
+  const THEME_KEY = "owl-weather:theme";
+  const THEME_COLORS = { light: "#003366", white: "#ffffff", dark: "#001a33" };
+  const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+
+  function applyTheme(pref) {
+    const resolved = pref === "system" ? (darkQuery && darkQuery.matches ? "dark" : "light") : pref;
+    const root = document.documentElement;
+    root.setAttribute("data-theme-pref", pref);
+    root.setAttribute("data-theme", resolved);
+    if (themeMeta) themeMeta.setAttribute("content", THEME_COLORS[resolved]);
+    els.themeSelect.value = pref;
+  }
+
+  let themePref = document.documentElement.getAttribute("data-theme-pref") || "system";
+  applyTheme(themePref);
+  els.themeSelect.addEventListener("change", () => {
+    themePref = els.themeSelect.value;
+    try { localStorage.setItem(THEME_KEY, themePref); } catch (e) { /* ignore */ }
+    applyTheme(themePref);
+  });
+  if (darkQuery) {
+    const onSystemChange = () => { if (themePref === "system") applyTheme("system"); };
+    if (darkQuery.addEventListener) darkQuery.addEventListener("change", onSystemChange);
+    else if (darkQuery.addListener) darkQuery.addListener(onSystemChange);
+  }
 
   // ---------- Boot ----------
   syncUnitButtons();

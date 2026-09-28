@@ -9,6 +9,8 @@ An FAU-branded weather app that defaults to the **Boca Raton campus**. Weather a
 - One-click buttons for every FAU campus: Boca Raton, Jupiter, Davie, Fort Lauderdale, Dania Beach (SeaTech), Harbor Branch
 - "My location" button (browser geolocation)
 - °F / °C toggle. The last place and unit you picked are remembered.
+- Four color themes: System (follows your device's light/dark setting), Light, White, and Dark. Your choice is remembered.
+- A personal welcome for Dr. Lee with a quick weather summary and tips (umbrella, heat, UV, storms)
 - FAU Blue (#003366) and FAU Red (#CC0000) theme with the FAU owl logo; works on phones
 
 ## Project layout
