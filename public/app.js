@@ -5,6 +5,8 @@
   const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
   const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
   const STORAGE_KEY = "owl-weather:v1";
+  const REQUEST_TIMEOUT_MS = 10000;
+  const MAX_QUERY_LENGTH = 100;
 
   const CAMPUSES = [
     { name: "Boca Raton", label: "FAU Boca Raton Campus", region: "Florida", lat: 26.3728, lon: -80.1024 },
@@ -120,9 +122,45 @@
     return `<svg viewBox="0 0 64 64" role="img" aria-hidden="true">${body}</svg>`;
   }
 
+  // The only HTML this app ever parses is the static icon markup above: iconSvg() takes a
+  // fixed `kind` key and a boolean, never API or user text. Under the CSP's Trusted Types
+  // enforcement, this private policy is the single gate for that markup; everything
+  // data-driven is written with textContent.
+  const iconPolicy = window.trustedTypes && window.trustedTypes.createPolicy
+    ? window.trustedTypes.createPolicy("owl-weather", { createHTML: (html) => html })
+    : { createHTML: (html) => html };
+
+  function iconEl(kind, isDay) {
+    const t = document.createElement("template");
+    t.innerHTML = iconPolicy.createHTML(iconSvg(kind, isDay));
+    return t.content.firstElementChild;
+  }
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
   // ---------- Helpers ----------
+  // Saved state and API results are untrusted input: keep only well-formed fields.
+  function cleanPlace(p) {
+    if (!p || typeof p !== "object") return null;
+    const lat = Number(p.lat);
+    const lon = Number(p.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    const str = (v) => (typeof v === "string" ? v.slice(0, MAX_QUERY_LENGTH) : "");
+    const place = { name: str(p.name) || "Saved place", region: str(p.region), lat, lon };
+    if (CAMPUSES.some((c) => c.name === p.campus)) place.campus = p.campus;
+    return place;
+  }
   function loadSaved() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!raw || typeof raw !== "object") return {};
+      return { place: cleanPlace(raw.place), unit: raw.unit };
+    } catch (e) { return {}; }
   }
   function save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ place: state.place, unit: state.unit })); } catch (e) { /* ignore */ }
@@ -150,7 +188,8 @@
     const p = parseLocal(iso);
     return `${DOW[p.dow]}, ${MON[p.m - 1]} ${p.day}`;
   }
-  const round = (n) => (n == null || isNaN(n) ? "--" : Math.round(n));
+  const round = (n) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n) : "--");
+  const pct = (n) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? `${Math.round(n)}%` : "");
 
   function compass(deg) {
     if (deg == null) return "";
@@ -171,6 +210,30 @@
   }
 
   // ---------- Fetching ----------
+  // No cookies or referrer go to the API, and a hung request gives up after REQUEST_TIMEOUT_MS.
+  async function getJSON(url, label) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, mode: "cors", credentials: "omit", referrerPolicy: "no-referrer" });
+      if (!res.ok) throw new Error(`${label} failed (${res.status})`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/;
+  const isTimes = (a) => Array.isArray(a) && a.length > 0 && a.every((t) => typeof t === "string" && LOCAL_TIME.test(t));
+  const isArrays = (o, keys) => !!o && keys.every((k) => Array.isArray(o[k]));
+
+  function isValidForecast(d) {
+    return !!d && !!d.current && typeof d.current.time === "string" && LOCAL_TIME.test(d.current.time) &&
+      isArrays(d.hourly, ["temperature_2m", "precipitation_probability", "weather_code", "is_day"]) && isTimes(d.hourly.time) &&
+      isArrays(d.daily, ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max", "uv_index_max"]) &&
+      isTimes(d.daily.time) && isTimes(d.daily.sunrise) && isTimes(d.daily.sunset);
+  }
+
   async function fetchForecast(place, unit) {
     const params = new URLSearchParams({
       latitude: place.lat,
@@ -184,22 +247,24 @@
       timezone: "auto",
       forecast_days: "7",
     });
-    const res = await fetch(`${FORECAST_URL}?${params}`);
-    if (!res.ok) throw new Error(`Forecast request failed (${res.status})`);
-    return res.json();
+    const data = await getJSON(`${FORECAST_URL}?${params}`, "Forecast request");
+    if (!isValidForecast(data)) throw new Error("Forecast response was malformed");
+    return data;
   }
 
   async function geocode(query) {
-    const params = new URLSearchParams({ name: query, count: "6", language: "en", format: "json" });
-    const res = await fetch(`${GEOCODE_URL}?${params}`);
-    if (!res.ok) throw new Error(`Search failed (${res.status})`);
-    const data = await res.json();
-    return (data.results || []).map((r) => ({
-      name: r.name,
-      region: [r.admin1, r.country_code === "US" ? null : r.country].filter(Boolean).join(", "),
-      lat: r.latitude,
-      lon: r.longitude,
-    }));
+    const params = new URLSearchParams({ name: query.slice(0, MAX_QUERY_LENGTH), count: "6", language: "en", format: "json" });
+    const data = await getJSON(`${GEOCODE_URL}?${params}`, "Search");
+    const list = data && Array.isArray(data.results) ? data.results : [];
+    return list
+      .filter((r) => r && typeof r.name === "string")
+      .map((r) => cleanPlace({
+        name: r.name,
+        region: [r.admin1, r.country_code === "US" ? null : r.country].filter((v) => typeof v === "string" && v).join(", "),
+        lat: r.latitude,
+        lon: r.longitude,
+      }))
+      .filter(Boolean);
   }
 
   async function load() {
@@ -234,7 +299,7 @@
     const campus = state.place.campus && CAMPUSES.find((c) => c.name === state.place.campus);
     els.placeName.textContent = campus ? campus.label : placeLabel(state.place);
     els.placeTime.textContent = `${fmtDate(cur.time)} · ${fmtClock(cur.time)} local time`;
-    els.currentIcon.innerHTML = iconSvg(kind, cur.is_day === 1);
+    els.currentIcon.replaceChildren(iconEl(kind, cur.is_day === 1));
     els.currentTemp.textContent = round(cur.temperature_2m);
     els.currentDesc.textContent = desc;
     els.feelsLike.textContent = round(cur.apparent_temperature);
@@ -244,7 +309,7 @@
     els.wind.textContent = `${round(cur.wind_speed_10m)} ${speedUnit} ${compass(cur.wind_direction_10m)}`.trim();
     els.gusts.textContent = `${round(cur.wind_gusts_10m)} ${speedUnit}`;
     els.uv.textContent = uvLabel(daily.uv_index_max[0]);
-    els.rain.textContent = daily.precipitation_probability_max[0] == null ? "--" : `${daily.precipitation_probability_max[0]}%`;
+    els.rain.textContent = round(daily.precipitation_probability_max[0]) === "--" ? "--" : `${round(daily.precipitation_probability_max[0])}%`;
     els.sun.textContent = `${fmtClock(daily.sunrise[0])} / ${fmtClock(daily.sunset[0])}`;
 
     renderWelcome(cur, daily, desc, campus);
@@ -298,14 +363,14 @@
     for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
       const [desc, kind] = describe(hourly.weather_code[i]);
       const pop = hourly.precipitation_probability[i];
-      const div = document.createElement("div");
-      div.className = "hour" + (i === start ? " now" : "");
+      const div = el("div", "hour" + (i === start ? " now" : ""));
       div.title = desc;
-      div.innerHTML =
-        `<span class="time">${i === start ? "Now" : fmtHour(hourly.time[i])}</span>` +
-        iconSvg(kind, hourly.is_day[i] === 1) +
-        `<span class="t">${round(hourly.temperature_2m[i])}°</span>` +
-        `<span class="pop">${pop ? pop + "%" : ""}</span>`;
+      div.append(
+        el("span", "time", i === start ? "Now" : fmtHour(hourly.time[i])),
+        iconEl(kind, hourly.is_day[i] === 1),
+        el("span", "t", `${round(hourly.temperature_2m[i])}°`),
+        el("span", "pop", pct(pop))
+      );
       frag.appendChild(div);
     }
     els.hourly.replaceChildren(frag);
@@ -325,20 +390,22 @@
       const left = ((lows[i] - min) / span) * 100;
       const width = Math.max(4, ((highs[i] - lows[i]) / span) * 100);
       const pop = daily.precipitation_probability_max[i];
-      const li = document.createElement("li");
-      li.className = "day";
-      li.innerHTML =
-        `<span class="name">${i === 0 ? "Today" : DOW[p.dow]}<small>${MON[p.m - 1]} ${p.day}</small></span>` +
-        `<span title="${desc}">${iconSvg(kind, true)}</span>` +
-        `<span class="range"><span class="lo">${round(lows[i])}°</span>` +
-        `<span class="bar"><span></span></span>` +
-        `<span class="hi">${round(highs[i])}°</span></span>` +
-        `<span class="pop">${pop ? pop + "%" : ""}</span>`;
-      // Set via CSSOM rather than a style attribute so the Netlify CSP allows it.
-      const fill = li.querySelector(".bar span");
+      const li = el("li", "day");
+      const name = el("span", "name", i === 0 ? "Today" : DOW[p.dow]);
+      name.append(el("small", null, `${MON[p.m - 1]} ${p.day}`));
+      const icon = el("span");
+      icon.title = desc;
+      icon.append(iconEl(kind, true));
+      const fill = el("span");
+      const bar = el("span", "bar");
+      bar.append(fill);
+      const range = el("span", "range");
+      range.append(el("span", "lo", `${round(lows[i])}°`), bar, el("span", "hi", `${round(highs[i])}°`));
+      li.append(name, icon, range, el("span", "pop", pct(pop)));
+      // Set via CSSOM rather than a style attribute so the CSP allows it.
       fill.style.left = `${left}%`;
       fill.style.width = `${Math.min(width, 100 - left)}%`;
-      li.setAttribute("aria-label", `${fmtDate(t)}: ${desc}, high ${round(highs[i])}, low ${round(lows[i])}` + (pop ? `, ${pop}% chance of rain` : ""));
+      li.setAttribute("aria-label", `${fmtDate(t)}: ${desc}, high ${round(highs[i])}, low ${round(lows[i])}` + (pct(pop) ? `, ${pct(pop)} chance of rain` : ""));
       frag.appendChild(li);
     });
     els.daily.replaceChildren(frag);
@@ -406,7 +473,7 @@
   }
 
   async function runSearch(query) {
-    const q = query.trim();
+    const q = query.trim().slice(0, MAX_QUERY_LENGTH);
     if (q.length < 2) { hideResults(); return; }
     const seq = ++searchSeq;
     try {
@@ -439,7 +506,7 @@
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (activeIndex >= 0 && results[activeIndex]) { selectPlace(results[activeIndex]); return; }
-    const q = els.input.value.trim();
+    const q = els.input.value.trim().slice(0, MAX_QUERY_LENGTH);
     if (!q) return;
     clearTimeout(searchTimer);
     try {
@@ -457,9 +524,10 @@
     if (!navigator.geolocation) { setStatus("Your browser doesn't support location.", "info"); return; }
     setStatus("Finding your location…", "info");
     navigator.geolocation.getCurrentPosition(
-      (pos) => selectPlace({ name: "My location", region: "", lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4) }),
+      // Two decimals (~1 km) is plenty for a forecast and avoids sending or storing a precise position.
+      (pos) => selectPlace({ name: "My location", region: "", lat: +pos.coords.latitude.toFixed(2), lon: +pos.coords.longitude.toFixed(2) }),
       () => setStatus("Location access was denied. Showing the last selected place.", "info"),
-      { timeout: 10000, maximumAge: 600000 }
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
     );
   });
 
@@ -470,8 +538,9 @@
   }
   unitButtons.forEach((b) =>
     b.addEventListener("click", () => {
-      if (state.unit === b.dataset.unit) return;
-      state.unit = b.dataset.unit;
+      const unit = b.dataset.unit === "celsius" ? "celsius" : "fahrenheit";
+      if (state.unit === unit) return;
+      state.unit = unit;
       syncUnitButtons();
       load();
     })
@@ -503,7 +572,7 @@
   let themePref = document.documentElement.getAttribute("data-theme-pref") || "system";
   applyTheme(themePref);
   els.themeSelect.addEventListener("change", () => {
-    themePref = els.themeSelect.value;
+    themePref = ["system", "light", "white", "dark"].includes(els.themeSelect.value) ? els.themeSelect.value : "system";
     try { localStorage.setItem(THEME_KEY, themePref); } catch (e) { /* ignore */ }
     applyTheme(themePref);
   });

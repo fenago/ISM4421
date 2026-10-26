@@ -1,3 +1,21 @@
+/* ---------- Fonts ----------
+   Self-hosted (SIL Open Font License) so the page loads no third-party CSS or fonts.
+   Latin subset of the variable fonts from Google Fonts. */
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("assets/fonts/open-sans-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto Slab";
+  font-style: normal;
+  font-weight: 700 800;
+  font-display: swap;
+  src: url("assets/fonts/roboto-slab-latin.woff2") format("woff2");
+}
+
 /* ---------- Brand + theme tokens ----------
    data-theme on <html> is set by theme-init.js / app.js: light (default), white, dark.
    "System" resolves to light or dark from the OS setting. */

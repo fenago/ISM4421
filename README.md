@@ -19,8 +19,11 @@ public/            # the site Netlify publishes
   index.html
   styles.css
   app.js
+  theme-init.js
   assets/fau-mark.svg   # fallback logo
+  assets/fonts/         # self-hosted Open Sans + Roboto Slab (SIL Open Font License)
 scripts/fetch-fau-logo.sh  # downloads the official FAU owl logo at build time
+tests/security.test.js     # OWASP security regression test (optional, needs Playwright)
 netlify.toml       # build settings plus security and cache headers
 ```
 It's plain HTML, CSS and JavaScript. There's no framework and no `npm install`.
@@ -52,6 +55,26 @@ sh scripts/fetch-fau-logo.sh   # optional
 cd public && python3 -m http.server 8080
 # open http://localhost:8080
 ```
+
+## Security (OWASP Top 10)
+The app was audited against the OWASP Top 10 (2021). It is a static site with no server code, accounts, or stored personal data, so access control, authentication, and SSRF (A01, A07, A10) don't apply. What's in place for the rest:
+
+| OWASP risk | Controls |
+|---|---|
+| A02 Cryptographic failures | HTTPS enforced with HSTS and `upgrade-insecure-requests`. All API calls use HTTPS. |
+| A03 Injection (XSS) | No API, search, or saved data is ever parsed as HTML; it's all written with `textContent`. The CSP enforces **Trusted Types**, so the only HTML sink is a private policy that renders the built-in weather icons. No inline scripts or styles, and no `eval`. |
+| A04 Insecure design | Location is rounded to about 1 km before it's sent or saved. No cookies or referrer go to the API. Search length is capped and requests time out after 10 s. |
+| A05 Security misconfiguration | A strict CSP (`default-src 'none'`, `frame-ancestors 'none'`, `object-src 'none'`), plus HSTS, X-Frame-Options, nosniff, `Referrer-Policy: no-referrer`, a locked-down Permissions-Policy, COOP and CORP. A matching `<meta>` CSP covers hosts that don't send `netlify.toml`'s headers. |
+| A06 Vulnerable components | No third-party code or CSS at runtime. Fonts are self-hosted, and there are no npm dependencies. |
+| A08 Software & data integrity | API responses and `localStorage` are schema-checked before use; bad data falls back to defaults. The build only publishes the downloaded logo if it's a real PNG under 2 MB, fetched over HTTPS. |
+| A09 Logging & monitoring | Errors are logged to the browser console without personal data. The user sees a generic message. |
+
+Run the regression test (it serves the site with the production headers, mocks the APIs with malicious data, and checks that nothing is injected):
+```bash
+npm install -g playwright && npx playwright install chromium   # once
+node tests/security.test.js
+```
+If you change the CSP, update it in both `netlify.toml` and the `<meta>` tag in `public/index.html`.
 
 ## Data attribution
 Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed under CC BY 4.0. The free tier is for non-commercial use.
