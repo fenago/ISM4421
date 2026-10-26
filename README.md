@@ -9,9 +9,10 @@ An FAU-branded weather app that defaults to the **Boca Raton campus**. Weather a
 - One-click buttons for every FAU campus: Boca Raton, Jupiter, Davie, Fort Lauderdale, Dania Beach (SeaTech), Harbor Branch
 - "My location" button (browser geolocation)
 - °F / °C toggle. The last place and unit you picked are remembered.
-- Four color themes: System (follows your device's light/dark setting), Light, White, and Dark. Your choice is remembered.
+- Glass design with two looks: daylight glass (Light) and night glass (Dark), plus System, which follows your device's setting. Your choice is remembered.
 - A personal welcome for Dr. Lee with a quick weather summary and tips (umbrella, heat, UV, storms)
-- FAU Blue (#003366) and FAU Red (#CC0000) theme with the FAU owl logo; works on phones
+- Stat tiles for humidity (with dew point), wind, gusts (with the strongest hour), UV, rain chance (with when rain is likely), and sunrise/sunset
+- FAU owl logo and FAU Blue accents; the layout adapts from desktop to phone
 
 ## Project layout
 ```
@@ -19,9 +20,9 @@ public/            # the site Netlify publishes
   index.html
   styles.css
   app.js
+  icons.js         # the Lucide icons the UI uses (ISC license), built as DOM nodes
   theme-init.js
   assets/fau-mark.svg   # fallback logo
-  assets/fonts/         # self-hosted Open Sans + Roboto Slab (SIL Open Font License)
 scripts/fetch-fau-logo.sh  # downloads the official FAU owl logo at build time
 tests/security.test.js     # OWASP security regression test (optional, needs Playwright)
 netlify.toml       # build settings plus security and cache headers
@@ -62,10 +63,10 @@ The app was audited against the OWASP Top 10 (2021). It is a static site with no
 | OWASP risk | Controls |
 |---|---|
 | A02 Cryptographic failures | HTTPS enforced with HSTS and `upgrade-insecure-requests`. All API calls use HTTPS. |
-| A03 Injection (XSS) | No API, search, or saved data is ever parsed as HTML; it's all written with `textContent`. The CSP enforces **Trusted Types**, so the only HTML sink is a private policy that renders the built-in weather icons. No inline scripts or styles, and no `eval`. |
+| A03 Injection (XSS) | No API, search, or saved data is ever parsed as HTML; it's all written with `textContent`. The app never parses HTML at all (icons are built as DOM nodes), and the CSP enforces **Trusted Types** with no policy allowed. No inline scripts or styles, and no `eval`. |
 | A04 Insecure design | Location is rounded to about 1 km before it's sent or saved. No cookies or referrer go to the API. Search length is capped and requests time out after 10 s. |
 | A05 Security misconfiguration | A strict CSP (`default-src 'none'`, `frame-ancestors 'none'`, `object-src 'none'`), plus HSTS, X-Frame-Options, nosniff, `Referrer-Policy: no-referrer`, a locked-down Permissions-Policy, COOP and CORP. A matching `<meta>` CSP covers hosts that don't send `netlify.toml`'s headers. |
-| A06 Vulnerable components | No third-party code or CSS at runtime. Fonts are self-hosted, and there are no npm dependencies. |
+| A06 Vulnerable components | No third-party code, CSS, or fonts at runtime. The few icons used are copied into `icons.js`, and there are no npm dependencies. |
 | A08 Software & data integrity | API responses and `localStorage` are schema-checked before use; bad data falls back to defaults. The build only publishes the downloaded logo if it's a real PNG under 2 MB, fetched over HTTPS. |
 | A09 Logging & monitoring | Errors are logged to the browser console without personal data. The user sees a generic message. |
 

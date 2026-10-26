@@ -3,7 +3,8 @@
 (function () {
   var pref = "system";
   try { pref = localStorage.getItem("owl-weather:theme") || "system"; } catch (e) { /* ignore */ }
-  if (["system", "light", "white", "dark"].indexOf(pref) < 0) pref = "system";
+  if (pref === "white") pref = "light"; // the old "White" theme folded into Light
+  if (["system", "light", "dark"].indexOf(pref) < 0) pref = "system";
   var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
   var root = document.documentElement;
   root.setAttribute("data-theme-pref", pref);

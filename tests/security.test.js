@@ -26,8 +26,8 @@ function forecast(evil) {
   const hours = Array.from({ length: 48 }, (_, i) => `2026-10-26T${String(i % 24).padStart(2, "0")}:00`);
   const days = Array.from({ length: 7 }, (_, i) => `2026-10-${26 + i}`);
   return {
-    current: { time: "2026-10-26T14:00", temperature_2m: 84, relative_humidity_2m: 70, apparent_temperature: 90, is_day: 1, weather_code: 2, wind_speed_10m: 10, wind_direction_10m: 90, wind_gusts_10m: 20 },
-    hourly: { time: hours, temperature_2m: hours.map(() => 80), precipitation_probability: hours.map(() => (evil ? XSS : 30)), weather_code: hours.map(() => 61), is_day: hours.map(() => 1) },
+    current: { time: "2026-10-26T14:00", temperature_2m: 84, relative_humidity_2m: 70, apparent_temperature: 90, dew_point_2m: 71, is_day: 1, weather_code: 2, wind_speed_10m: 10, wind_direction_10m: 90, wind_gusts_10m: 20 },
+    hourly: { time: hours, temperature_2m: hours.map(() => 80), precipitation_probability: hours.map(() => (evil ? XSS : 30)), weather_code: hours.map(() => 61), is_day: hours.map(() => 1), wind_gusts_10m: hours.map((_, i) => 10 + (i % 24)) },
     daily: { time: days, weather_code: days.map(() => 3), temperature_2m_max: days.map(() => 88), temperature_2m_min: days.map(() => 74), precipitation_probability_max: days.map(() => (evil ? XSS : 40)), sunrise: days.map((d) => d + "T07:20"), sunset: days.map((d) => d + "T18:40"), uv_index_max: days.map(() => 7) },
   };
 }
@@ -75,9 +75,9 @@ function forecast(evil) {
       const hours = await page.locator("#hourly .hour svg").count();
       const days = await page.locator("#daily .day").count();
       const pop = await page.textContent("#hourly .hour .pop");
-      const font = await page.evaluate(() => document.fonts.check('800 16px "Roboto Slab"'));
       check(temp === "84" && hours === 24 && days === 7 && pop === "30%", `[normal] renders weather (temp ${temp}, ${hours} hours, ${days} days, pop ${pop})`);
-      check(font, "[normal] self-hosted fonts load under CSP");
+      const notes = await page.locator(".tile-note").allTextContents();
+      check(notes.includes("Dew point 71°") && notes.some((n) => n.startsWith("Strongest at")), `[normal] stat tiles show derived notes (${notes.join(" / ")})`);
       // Search renders hostile geocoder names as text and drops the invalid entry.
       await page.fill("#search-input", "new");
       await page.waitForTimeout(700);

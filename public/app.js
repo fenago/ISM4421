@@ -35,7 +35,6 @@
     placeTime: $("place-time"),
     greeting: $("greeting"),
     welcomeLine: $("welcome-line"),
-    themeSelect: $("theme-select"),
     currentIcon: $("current-icon"),
     currentTemp: $("current-temp"),
     currentDesc: $("current-desc"),
@@ -48,6 +47,12 @@
     uv: $("stat-uv"),
     rain: $("stat-rain"),
     sun: $("stat-sun"),
+    humidityNote: $("note-humidity"),
+    windNote: $("note-wind"),
+    gustsNote: $("note-gusts"),
+    uvNote: $("note-uv"),
+    rainNote: $("note-rain"),
+    sunNote: $("note-sun"),
     hourly: $("hourly"),
     daily: $("daily"),
     form: $("search-form"),
@@ -93,47 +98,20 @@
     return WEATHER[code] || ["Unknown", "cloudy"];
   }
 
-  // ---------- Icons (inline SVG, FAU palette) ----------
-  const C = { sun: "#f5a623", moon: "#8fa9c7", cloud: "#b9c4d2", cloudDark: "#7f8b9b", rain: "#004a8f", bolt: "#cc0000", snow: "#7fb2e5" };
-  const sunSvg = `<circle cx="32" cy="32" r="11" fill="${C.sun}"/><g stroke="${C.sun}" stroke-width="3.5" stroke-linecap="round"><path d="M32 8v7M32 49v7M8 32h7M49 32h7M15 15l5 5M44 44l5 5M15 49l5-5M44 20l5-5"/></g>`;
-  const moonSvg = `<path d="M40 12a20 20 0 1 0 12 30A16 16 0 0 1 40 12z" fill="${C.moon}"/>`;
-  const cloudPath = (fill, dy = 0) => `<path transform="translate(0 ${dy})" d="M20 50h26a11 11 0 0 0 1-22 15 15 0 0 0-28-3 12 12 0 0 0 1 25z" fill="${fill}"/>`;
-  const smallSun = `<g transform="translate(-6 -8) scale(.75)">${sunSvg}</g>`;
-  const smallMoon = `<g transform="translate(-4 -6) scale(.75)">${moonSvg}</g>`;
-  const drops = (n) => {
-    const xs = n === 2 ? [26, 38] : [22, 32, 42];
-    return xs.map((x) => `<path class="rain" d="M${x} 52l-3 8" stroke="${C.rain}" stroke-width="3.5" stroke-linecap="round"/>`).join("");
+  // ---------- Icons (Lucide subset from icons.js, built as DOM nodes) ----------
+  const ICON_FOR = {
+    clear: ["sun", "moon"],
+    partly: ["cloud-sun", "cloud-moon"],
+    cloudy: ["cloud", "cloud"],
+    fog: ["cloud-fog", "cloud-fog"],
+    drizzle: ["cloud-drizzle", "cloud-drizzle"],
+    rain: ["cloud-rain", "cloud-rain"],
+    snow: ["cloud-snow", "cloud-snow"],
+    storm: ["cloud-lightning", "cloud-lightning"],
   };
-
-  function iconSvg(kind, isDay) {
-    const body = (() => {
-      switch (kind) {
-        case "clear": return isDay ? sunSvg : moonSvg;
-        case "partly": return (isDay ? smallSun : smallMoon) + cloudPath(C.cloud, 4);
-        case "cloudy": return cloudPath(C.cloudDark, -6) + cloudPath(C.cloud, 2);
-        case "fog": return cloudPath(C.cloud, -8) + `<g stroke="${C.cloudDark}" stroke-width="3.5" stroke-linecap="round"><path d="M14 50h36M18 57h28"/></g>`;
-        case "drizzle": return cloudPath(C.cloud, -8) + drops(2);
-        case "rain": return cloudPath(C.cloudDark, -8) + drops(3);
-        case "snow": return cloudPath(C.cloud, -8) + `<g fill="${C.snow}"><circle cx="22" cy="54" r="3"/><circle cx="32" cy="59" r="3"/><circle cx="42" cy="54" r="3"/></g>`;
-        case "storm": return cloudPath(C.cloudDark, -8) + `<path d="M34 42l-8 12h7l-4 10 11-14h-7l4-8z" fill="${C.bolt}"/>`;
-        default: return cloudPath(C.cloud, 0);
-      }
-    })();
-    return `<svg viewBox="0 0 64 64" role="img" aria-hidden="true">${body}</svg>`;
-  }
-
-  // The only HTML this app ever parses is the static icon markup above: iconSvg() takes a
-  // fixed `kind` key and a boolean, never API or user text. Under the CSP's Trusted Types
-  // enforcement, this private policy is the single gate for that markup; everything
-  // data-driven is written with textContent.
-  const iconPolicy = window.trustedTypes && window.trustedTypes.createPolicy
-    ? window.trustedTypes.createPolicy("owl-weather", { createHTML: (html) => html })
-    : { createHTML: (html) => html };
-
   function iconEl(kind, isDay) {
-    const t = document.createElement("template");
-    t.innerHTML = iconPolicy.createHTML(iconSvg(kind, isDay));
-    return t.content.firstElementChild;
+    const pair = ICON_FOR[kind] || ICON_FOR.cloudy;
+    return window.OwlIcons.icon(pair[isDay ? 0 : 1]);
   }
 
   function el(tag, className, text) {
@@ -195,11 +173,9 @@
     if (deg == null) return "";
     return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
   }
-  function uvLabel(uv) {
-    if (uv == null) return "--";
-    const v = Math.round(uv);
-    const level = uv < 3 ? "Low" : uv < 6 ? "Moderate" : uv < 8 ? "High" : uv < 11 ? "Very high" : "Extreme";
-    return `${v} · ${level}`;
+  function uvLevel(uv) {
+    if (typeof uv !== "number" || !Number.isFinite(uv)) return "";
+    return uv < 3 ? "Low" : uv < 6 ? "Moderate" : uv < 8 ? "High" : uv < 11 ? "Very high" : "Extreme";
   }
   function placeLabel(p) {
     return [p.name, p.region].filter(Boolean).join(", ");
@@ -229,7 +205,7 @@
 
   function isValidForecast(d) {
     return !!d && !!d.current && typeof d.current.time === "string" && LOCAL_TIME.test(d.current.time) &&
-      isArrays(d.hourly, ["temperature_2m", "precipitation_probability", "weather_code", "is_day"]) && isTimes(d.hourly.time) &&
+      isArrays(d.hourly, ["temperature_2m", "precipitation_probability", "weather_code", "is_day", "wind_gusts_10m"]) && isTimes(d.hourly.time) &&
       isArrays(d.daily, ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max", "uv_index_max"]) &&
       isTimes(d.daily.time) && isTimes(d.daily.sunrise) && isTimes(d.daily.sunset);
   }
@@ -238,8 +214,8 @@
     const params = new URLSearchParams({
       latitude: place.lat,
       longitude: place.lon,
-      current: "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
-      hourly: "temperature_2m,precipitation_probability,weather_code,is_day",
+      current: "temperature_2m,relative_humidity_2m,apparent_temperature,dew_point_2m,is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+      hourly: "temperature_2m,precipitation_probability,weather_code,is_day,wind_gusts_10m",
       daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max",
       temperature_unit: unit,
       wind_speed_unit: unit === "fahrenheit" ? "mph" : "kmh",
@@ -300,21 +276,32 @@
     els.placeName.textContent = campus ? campus.label : placeLabel(state.place);
     els.placeTime.textContent = `${fmtDate(cur.time)} · ${fmtClock(cur.time)} local time`;
     els.currentIcon.replaceChildren(iconEl(kind, cur.is_day === 1));
+    const start = firstHourIndex(hourly, cur.time);
+    const next24 = (key) => hourly[key].slice(start, start + 24);
     els.currentTemp.textContent = round(cur.temperature_2m);
     els.currentDesc.textContent = desc;
     els.feelsLike.textContent = round(cur.apparent_temperature);
     els.todayHi.textContent = round(daily.temperature_2m_max[0]);
     els.todayLo.textContent = round(daily.temperature_2m_min[0]);
+    const rainToday = round(daily.precipitation_probability_max[0]);
+
     els.humidity.textContent = `${round(cur.relative_humidity_2m)}%`;
-    els.wind.textContent = `${round(cur.wind_speed_10m)} ${speedUnit} ${compass(cur.wind_direction_10m)}`.trim();
+    els.humidityNote.textContent = round(cur.dew_point_2m) === "--" ? "" : `Dew point ${round(cur.dew_point_2m)}°`;
+    els.wind.textContent = `${round(cur.wind_speed_10m)} ${speedUnit}`;
+    els.windNote.textContent = compass(cur.wind_direction_10m) ? `From ${compass(cur.wind_direction_10m)}` : "";
     els.gusts.textContent = `${round(cur.wind_gusts_10m)} ${speedUnit}`;
-    els.uv.textContent = uvLabel(daily.uv_index_max[0]);
-    els.rain.textContent = round(daily.precipitation_probability_max[0]) === "--" ? "--" : `${round(daily.precipitation_probability_max[0])}%`;
-    els.sun.textContent = `${fmtClock(daily.sunrise[0])} / ${fmtClock(daily.sunset[0])}`;
+    const peakGust = peakIndex(next24("wind_gusts_10m"));
+    els.gustsNote.textContent = peakGust < 0 ? "" : `Strongest at ${fmtHour(hourly.time[start + peakGust])}`;
+    els.uv.textContent = round(daily.uv_index_max[0]);
+    els.uvNote.textContent = uvLevel(daily.uv_index_max[0]);
+    els.rain.textContent = rainToday === "--" ? "--" : `${rainToday}%`;
+    els.rainNote.textContent = rainNote(next24("precipitation_probability"), hourly.time.slice(start, start + 24));
+    els.sun.textContent = fmtClock(daily.sunrise[0]);
+    els.sunNote.textContent = `Sunset ${fmtClock(daily.sunset[0])}`;
 
     renderWelcome(cur, daily, desc, campus);
 
-    renderHourly(hourly, cur.time);
+    renderHourly(hourly, start);
     renderDaily(daily);
   }
 
@@ -355,10 +342,27 @@
     els.welcomeLine.replaceChildren(document.createTextNode(line), tip);
   }
 
-  function renderHourly(hourly, nowIso) {
+  // Index of the current hour in the hourly arrays (they start at local midnight).
+  function firstHourIndex(hourly, nowIso) {
     const nowHour = nowIso.slice(0, 13); // "YYYY-MM-DDTHH"
-    let start = hourly.time.findIndex((t) => t.slice(0, 13) >= nowHour);
-    if (start < 0) start = 0;
+    const i = hourly.time.findIndex((t) => t.slice(0, 13) >= nowHour);
+    return i < 0 ? 0 : i;
+  }
+  function peakIndex(values) {
+    let best = -1;
+    values.forEach((v, i) => {
+      if (typeof v === "number" && Number.isFinite(v) && (best < 0 || v > values[best])) best = i;
+    });
+    return best;
+  }
+  function rainNote(pops, times) {
+    const likely = pops.findIndex((p) => typeof p === "number" && p >= 50);
+    if (likely === 0) return "Likely right now";
+    if (likely > 0) return `Likely from ${fmtHour(times[likely])}`;
+    return "Low chance next 24 hours";
+  }
+
+  function renderHourly(hourly, start) {
     const frag = document.createDocumentFragment();
     for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
       const [desc, kind] = describe(hourly.weather_code[i]);
@@ -368,8 +372,8 @@
       div.append(
         el("span", "time", i === start ? "Now" : fmtHour(hourly.time[i])),
         iconEl(kind, hourly.is_day[i] === 1),
-        el("span", "t", `${round(hourly.temperature_2m[i])}°`),
-        el("span", "pop", pct(pop))
+        el("span", "pop", pct(pop)),
+        el("span", "t", `${round(hourly.temperature_2m[i])}°`)
       );
       frag.appendChild(div);
     }
@@ -392,16 +396,13 @@
       const pop = daily.precipitation_probability_max[i];
       const li = el("li", "day");
       const name = el("span", "name", i === 0 ? "Today" : DOW[p.dow]);
-      name.append(el("small", null, `${MON[p.m - 1]} ${p.day}`));
       const icon = el("span");
       icon.title = desc;
       icon.append(iconEl(kind, true));
       const fill = el("span");
       const bar = el("span", "bar");
       bar.append(fill);
-      const range = el("span", "range");
-      range.append(el("span", "lo", `${round(lows[i])}°`), bar, el("span", "hi", `${round(highs[i])}°`));
-      li.append(name, icon, range, el("span", "pop", pct(pop)));
+      li.append(name, icon, el("span", "lo", `${round(lows[i])}°`), bar, el("span", "hi", `${round(highs[i])}°`));
       // Set via CSSOM rather than a style attribute so the CSP allows it.
       fill.style.left = `${left}%`;
       fill.style.width = `${Math.min(width, 100 - left)}%`;
@@ -556,9 +557,11 @@
   // ---------- Theme ----------
   // theme-init.js already applied the saved theme before first paint; this keeps it in sync.
   const THEME_KEY = "owl-weather:theme";
-  const THEME_COLORS = { light: "#003366", white: "#ffffff", dark: "#001a33" };
+  const THEMES = ["system", "light", "dark"];
+  const THEME_COLORS = { light: "#1f5c9e", dark: "#041428" };
   const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   const themeMeta = document.querySelector('meta[name="theme-color"]');
+  const themeButtons = document.querySelectorAll(".theme-toggle button");
 
   function applyTheme(pref) {
     const resolved = pref === "system" ? (darkQuery && darkQuery.matches ? "dark" : "light") : pref;
@@ -566,16 +569,19 @@
     root.setAttribute("data-theme-pref", pref);
     root.setAttribute("data-theme", resolved);
     if (themeMeta) themeMeta.setAttribute("content", THEME_COLORS[resolved]);
-    els.themeSelect.value = pref;
+    themeButtons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.themeChoice === pref ? "true" : "false"));
   }
 
-  let themePref = document.documentElement.getAttribute("data-theme-pref") || "system";
+  let themePref = document.documentElement.getAttribute("data-theme-pref");
+  if (!THEMES.includes(themePref)) themePref = "system";
   applyTheme(themePref);
-  els.themeSelect.addEventListener("change", () => {
-    themePref = ["system", "light", "white", "dark"].includes(els.themeSelect.value) ? els.themeSelect.value : "system";
-    try { localStorage.setItem(THEME_KEY, themePref); } catch (e) { /* ignore */ }
-    applyTheme(themePref);
-  });
+  themeButtons.forEach((b) =>
+    b.addEventListener("click", () => {
+      themePref = THEMES.includes(b.dataset.themeChoice) ? b.dataset.themeChoice : "system";
+      try { localStorage.setItem(THEME_KEY, themePref); } catch (e) { /* ignore */ }
+      applyTheme(themePref);
+    })
+  );
   if (darkQuery) {
     const onSystemChange = () => { if (themePref === "system") applyTheme("system"); };
     if (darkQuery.addEventListener) darkQuery.addEventListener("change", onSystemChange);
@@ -583,6 +589,8 @@
   }
 
   // ---------- Boot ----------
+  // Fill the static icon slots in index.html (data-icon="name").
+  document.querySelectorAll("[data-icon]").forEach((slot) => slot.replaceChildren(window.OwlIcons.icon(slot.dataset.icon)));
   syncUnitButtons();
   load();
   // Refresh every 15 minutes while the tab is open.

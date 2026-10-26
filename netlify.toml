@@ -9,8 +9,8 @@
   for = "/*"
   [headers.values]
     # Keep the CSP in sync with the fallback <meta> in public/index.html.
-    # require-trusted-types-for blocks any HTML injection except through app.js's "owl-weather" policy.
-    Content-Security-Policy = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src https://api.open-meteo.com https://geocoding-api.open-meteo.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types owl-weather"
+    # The app never parses HTML (icons are built as DOM nodes), so Trusted Types allows no policy at all.
+    Content-Security-Policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://api.open-meteo.com https://geocoding-api.open-meteo.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
